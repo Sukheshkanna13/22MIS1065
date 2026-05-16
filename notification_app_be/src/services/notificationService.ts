@@ -4,9 +4,9 @@ import { Notification, ReadStatus } from '../domain/notification';
 
 const readStore = new Map<string, ReadStatus>();
 
-async function getBearerToken(): Promise<string> {
-  if (config.bearerToken) return config.bearerToken;
+let _cachedToken: string | null = config.bearerToken || null;
 
+async function refreshToken(): Promise<string> {
   const res = await fetch(`${config.evalBaseUrl}/evaluation-service/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -25,7 +25,13 @@ async function getBearerToken(): Promise<string> {
   }
 
   const data = (await res.json()) as { access_token: string };
+  _cachedToken = data.access_token;
   return data.access_token;
+}
+
+async function getBearerToken(): Promise<string> {
+  if (_cachedToken) return _cachedToken;
+  return refreshToken();
 }
 
 export async function fetchAllNotifications(params: {
@@ -42,12 +48,20 @@ export async function fetchAllNotifications(params: {
   if (params.page) query.set('page', String(params.page));
   if (params.notification_type) query.set('notification_type', params.notification_type);
 
-  const res = await fetch(`${config.evalBaseUrl}/evaluation-service/notifications?${query}`, {
+  let res = await fetch(`${config.evalBaseUrl}/evaluation-service/notifications?${query}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
+  if (res.status === 401) {
+    _cachedToken = null;
+    const newToken = await refreshToken();
+    res = await fetch(`${config.evalBaseUrl}/evaluation-service/notifications?${query}`, {
+      headers: { Authorization: `Bearer ${newToken}` },
+    });
+  }
+
   if (!res.ok) {
-    await Log('backend', 'error', 'service', `Upstream notifications fetch failed: ${res.status}`);
+    await Log('backend', 'error', 'service', `Upstream fetch failed: ${res.status}`);
     throw new Error(`Upstream error: ${res.status}`);
   }
 
