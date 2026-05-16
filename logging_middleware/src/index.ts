@@ -83,6 +83,12 @@ async function getToken(): Promise<string> {
   return fetchToken(config);
 }
 
+function sanitizeMessage(raw: string): string {
+  const trimmed = raw.trim();
+  const padded = trimmed.length < 5 ? trimmed.padEnd(5, '.') : trimmed;
+  return padded.length > 48 ? padded.substring(0, 48) : padded;
+}
+
 async function postLog(stack: Stack, level: Level, pkg: Package, message: string): Promise<void> {
   const token = await getToken();
 
@@ -90,7 +96,7 @@ async function postLog(stack: Stack, level: Level, pkg: Package, message: string
     stack,
     level,
     package: pkg,
-    message,
+    message: sanitizeMessage(message),
   });
 
   const res = await fetch(LOG_ENDPOINT, {
@@ -103,6 +109,7 @@ async function postLog(stack: Stack, level: Level, pkg: Package, message: string
   });
 
   if (!res.ok) {
+    const errorBody = await res.text().catch(() => '');
     if (res.status === 401) {
       const config = configFromEnv();
       const newToken = await fetchToken(config);
@@ -115,11 +122,12 @@ async function postLog(stack: Stack, level: Level, pkg: Package, message: string
         body,
       });
       if (!retryRes.ok) {
-        throw new Error(`Log POST failed after token refresh: ${retryRes.status}`);
+        const retryBody = await retryRes.text().catch(() => '');
+        throw new Error(`Log POST failed after token refresh: ${retryRes.status} ${retryBody}`);
       }
       return;
     }
-    throw new Error(`Log POST failed: ${res.status}`);
+    throw new Error(`Log POST failed: ${res.status} ${errorBody}`);
   }
 }
 
